@@ -1,4 +1,4 @@
-﻿function CreateLogAnalyticsWorkspace {
+function Create-LogAnalyticsWorkspace {
     param(
         [string]$azRegion,
         [string]$azAAResourceGroupName,
@@ -15,7 +15,7 @@
     }
 }
 
-function CreateAzureAutomationAccount {
+function Create-AzureAutomationAccount {
      param(
           [string]$azRegion,
           [string]$aadTenantId,
@@ -43,7 +43,7 @@ function CreateAzureAutomationAccount {
 
      Write-Output "Checking Log Analytics Workspace"
 
-     CreateLogAnalyticsWorkspace -azAAResourceGroupName $azAAResourceGroupName -azRegion $azRegion `
+     Create-LogAnalyticsWorkspace -azAAResourceGroupName $azAAResourceGroupName -azRegion $azRegion `
         -azLAName $azLAName
 
      Write-Output "Creating Azure Automation Account $azAAName"
@@ -54,7 +54,7 @@ function CreateAzureAutomationAccount {
      .\CreateOrUpdateAzAutoAccount.ps1 @Params
 }
 
-function CreateAzureAutomationRunAsAccount {
+function Create-AzureAutomationRunAsAccount {
      param(
           [string]$automationAccountName,
           [string]$resourceGroupName,
@@ -183,7 +183,7 @@ function CreateAzureAutomationRunAsAccount {
      Write-Output "RunAsAccount Creation Completed..."     
 }
 
-function CreateLogicApp {
+function Create-LogicApp {
      param (
           [string]$wvdHostPoolName, <# TODO: Make this is an array #>
           [string]$azAAName,
@@ -306,7 +306,7 @@ $EndPeakTime = "17:00"
 $TimeDifference = "-5:00"
 # Enter the maximum number of sessions per CPU that will be used as a threshold to determine when new session host VMs need to be started during peak hours
 # This need not be the same number set in the host pool configuration
-$SessionThresholdPerCPU = ""
+$SessionThresholdPerCPU = 2
 # The minimum number of session host VMs to keep running during off-peak hours
 $MinimumNumberOfRDSH = 1
 # The minimum number of session host VMs to run during peak hours
@@ -363,14 +363,14 @@ Set-Location -Path $tempFolder
  # MULTIPLE HOST POOLS CAN USE THE SAME AUTOMATION ACCOUNT
  #>
 
-CreateAzureAutomationAccount -azRegion $AzAARegion -aadTenantId $AadTenantId -azSubscriptionId $AzSubscriptionId `
+Create-AzureAutomationAccount -azRegion $AzAARegion -aadTenantId $AadTenantId -azSubscriptionId $AzSubscriptionId `
      -azAAResourceGroupName $AzAAResourceGroupName -azAAName $AzAAName -azLAName $AzLAName
 
 <# Create the Azure Automation Account Run As credential
  # Based on https://abcdazure.azurewebsites.net/create-automation-account-with-powershell/
  #>
 Set-Item Env:\SuppressAzurePowerShellBreakingChangeWarnings "true"
-CreateAzureAutomationRunAsAccount -automationAccountName $AzAAName -resourceGroupName $AzAAResourceGroupName `
+Create-AzureAutomationRunAsAccount -automationAccountName $AzAAName -resourceGroupName $AzAAResourceGroupName `
     -keyVaultName $KeyVaultName -subscriptionId $AzSubscriptionId -location $AzAARegion `
     -tempFolder $TempFolder -aadTenantId $AadTenantId
 
@@ -385,7 +385,7 @@ $LogAnalyticsPrimaryKey = $Workspace.PrimarySharedKey
 $LogAnalyticsWorkspaceId = (Get-AzOperationalInsightsWorkspace -ResourceGroupName $AzAAResourceGroupName -Name $AzLAName).CustomerId.GUID
      
 # TODO: Make $WVDHostPoolName an array to create multiple logic apps at one time
-[string]$LogicAppName = CreateLogicApp -azAAName $AzAAName -azSubscriptionId $AzSubscriptionId -wvdHostPoolName $WVDHostPoolName `
+[string]$LogicAppName = Create-LogicApp -azAAName $AzAAName -azSubscriptionId $AzSubscriptionId -wvdHostPoolName $WVDHostPoolName `
     -resourceGroupName $AzAAResourceGroupName -aadTenantId $AADTenantId -azRegion $AzAARegion `
     -recurrenceInterval $RecurrenceInterval -beginPeakTime $BeginPeakTime -endPeakTime $EndPeakTime `
     -timeDifference $TimeDifference -sessionThresholdPerCPU $SessionThresholdPerCPU `
