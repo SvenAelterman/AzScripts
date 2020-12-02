@@ -1,4 +1,4 @@
-function Create-LogAnalyticsWorkspace {
+function New-LogAnalyticsWorkspace {
     param(
         [string]$azRegion,
         [string]$azAAResourceGroupName,
@@ -15,7 +15,7 @@ function Create-LogAnalyticsWorkspace {
     }
 }
 
-function Create-AzureAutomationAccount {
+function New-AzureAutomationAccount {
      param(
           [string]$azRegion,
           [string]$aadTenantId,
@@ -43,7 +43,7 @@ function Create-AzureAutomationAccount {
 
      Write-Output "Checking Log Analytics Workspace"
 
-     Create-LogAnalyticsWorkspace -azAAResourceGroupName $azAAResourceGroupName -azRegion $azRegion `
+     New-LogAnalyticsWorkspace -azAAResourceGroupName $azAAResourceGroupName -azRegion $azRegion `
         -azLAName $azLAName
 
      Write-Output "Creating Azure Automation Account $azAAName"
@@ -54,7 +54,7 @@ function Create-AzureAutomationAccount {
      .\CreateOrUpdateAzAutoAccount.ps1 @Params
 }
 
-function Create-AzureAutomationRunAsAccount {
+function New-AzureAutomationRunAsAccount {
      param(
           [string]$automationAccountName,
           [string]$resourceGroupName,
@@ -70,12 +70,12 @@ function Create-AzureAutomationRunAsAccount {
 
      while (!$GetKeyVault -And $Retries -le 6) {
           $Retries = $Retries++
-          Write-Warning -Message "Key Vault not found. Creating the Key Vault $keyVaultName."
+          Write-Warning -"Key Vault not found. Creating the Key Vault $keyVaultName."
      
           $NewKeyVault = New-AzKeyVault -VaultName $keyVaultName -ResourceGroupName $resourceGroupName -Location $location
      
           if (!$NewKeyVault) {
-               Write-Error -Message "Key Vault $keyVaultName creation failed."
+               Write-Error "Key Vault $keyVaultName creation failed."
                return
           }
 
@@ -183,7 +183,7 @@ function Create-AzureAutomationRunAsAccount {
      Write-Output "RunAsAccount Creation Completed..."     
 }
 
-function Create-LogicApp {
+function New-LogicApp {
      param (
           [string]$wvdHostPoolName, <# TODO: Make this is an array #>
           [string]$azAAName,
@@ -218,8 +218,6 @@ function Create-LogicApp {
           -AutomationAccountName $AutoAccount.AutomationAccountName)[0]
           #Out-GridView -OutputMode:Single -Title "Select the Azure RunAs connection asset"
 
-     #$WebhookURIAutoVar = Get-AzAutomationVariable -Name 'WebhookURIARMBased' -ResourceGroupName $AutoAccount.ResourceGroupName `
-     #     -AutomationAccountName $AutoAccount.AutomationAccountName
      $WebhookUri = Get-WebHookUri -azAAName $azAAName -resourceGroupName $resourceGroupName
 
      $Params = @{
@@ -348,9 +346,10 @@ $KeyVaultName = "$($CommonResourceNamePrefix)KV"
 # Get a resource group object
 try {
     Get-AzResourceGroup -Name $AzAAResourceGroupName -ErrorAction Stop
+    Write-Verbose "Found resource group"
 } 
 catch {
-    Write-Output "Creating Resource Group"
+    Write-Warning "Creating Resource Group"
     New-AzResourceGroup -Name $AzAAResourceGroupName -Location $AzAARegion
 }
 
@@ -363,14 +362,14 @@ Set-Location -Path $tempFolder
  # MULTIPLE HOST POOLS CAN USE THE SAME AUTOMATION ACCOUNT
  #>
 
-Create-AzureAutomationAccount -azRegion $AzAARegion -aadTenantId $AadTenantId -azSubscriptionId $AzSubscriptionId `
+New-AzureAutomationAccount -azRegion $AzAARegion -aadTenantId $AadTenantId -azSubscriptionId $AzSubscriptionId `
      -azAAResourceGroupName $AzAAResourceGroupName -azAAName $AzAAName -azLAName $AzLAName
 
 <# Create the Azure Automation Account Run As credential
  # Based on https://abcdazure.azurewebsites.net/create-automation-account-with-powershell/
  #>
 Set-Item Env:\SuppressAzurePowerShellBreakingChangeWarnings "true"
-Create-AzureAutomationRunAsAccount -automationAccountName $AzAAName -resourceGroupName $AzAAResourceGroupName `
+New-AzureAutomationRunAsAccount -automationAccountName $AzAAName -resourceGroupName $AzAAResourceGroupName `
     -keyVaultName $KeyVaultName -subscriptionId $AzSubscriptionId -location $AzAARegion `
     -tempFolder $TempFolder -aadTenantId $AadTenantId
 
@@ -385,7 +384,7 @@ $LogAnalyticsPrimaryKey = $Workspace.PrimarySharedKey
 $LogAnalyticsWorkspaceId = (Get-AzOperationalInsightsWorkspace -ResourceGroupName $AzAAResourceGroupName -Name $AzLAName).CustomerId.GUID
      
 # TODO: Make $WVDHostPoolName an array to create multiple logic apps at one time
-[string]$LogicAppName = Create-LogicApp -azAAName $AzAAName -azSubscriptionId $AzSubscriptionId -wvdHostPoolName $WVDHostPoolName `
+[string]$LogicAppName = New-LogicApp -azAAName $AzAAName -azSubscriptionId $AzSubscriptionId -wvdHostPoolName $WVDHostPoolName `
     -resourceGroupName $AzAAResourceGroupName -aadTenantId $AADTenantId -azRegion $AzAARegion `
     -recurrenceInterval $RecurrenceInterval -beginPeakTime $BeginPeakTime -endPeakTime $EndPeakTime `
     -timeDifference $TimeDifference -sessionThresholdPerCPU $SessionThresholdPerCPU `
@@ -456,11 +455,12 @@ if ($UseUsEduLogicApp) {
     Set-AzLogicApp -ResourceGroupName $AzAAResourceGroupName -Name $LogicAppName `
         -DefinitionFilePath ".\$($LogicAppDefinitionContentFileName)" -Force
 
+    # Re-enable the Logic App
     Write-Verbose "Re-enabling logic app"
-    # Re-enable the Logic App while making changes
     Set-AzLogicApp -ResourceGroupName $AzAAResourceGroupName -Name $LogicAppName `
         -State Enabled -Force
 }
 
 Write-Host "Completed..."
-Write-Verbose "You should clear the contents of the $TempFolder directory because secret values are contained in it."
+
+Write-Verbose "You should clear the contents of the $TempFolder directory because secrets are stored in it."
