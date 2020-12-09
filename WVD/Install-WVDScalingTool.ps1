@@ -1,4 +1,4 @@
-function New-LogAnalyticsWorkspace {
+function Create-LogAnalyticsWorkspace {
 	param(
 		[string]$azRegion,
 		[string]$azAAResourceGroupName,
@@ -15,7 +15,7 @@ function New-LogAnalyticsWorkspace {
 	}
 }
 
-function New-AzureAutomationAccount {
+function Create-AzureAutomationAccount {
 	param(
 		[string]$azRegion,
 		[string]$aadTenantId,
@@ -43,7 +43,7 @@ function New-AzureAutomationAccount {
 
 	Write-Output "Checking Log Analytics Workspace"
 
-	New-LogAnalyticsWorkspace -azAAResourceGroupName $azAAResourceGroupName -azRegion $azRegion `
+	Create-LogAnalyticsWorkspace -azAAResourceGroupName $azAAResourceGroupName -azRegion $azRegion `
 		-azLAName $azLAName
 
 	Write-Output "Creating Azure Automation Account $azAAName"
@@ -54,7 +54,7 @@ function New-AzureAutomationAccount {
 	.\CreateOrUpdateAzAutoAccount.ps1 @Params
 }
 
-function New-AzureAutomationRunAsAccount {
+function Create-AzureAutomationRunAsAccount {
 	param(
 		[string]$automationAccountName,
 		[string]$resourceGroupName,
@@ -278,7 +278,7 @@ $TempFolder = "C:\Temp"
 # TODO: Get from params
 
 # Common Prefix (can be left blank if not desired)
-$CommonResourceNamePrefix = "WVD-ScaleAuto-Test-"
+$CommonResourceNamePrefix = "WVDdemo-ScaleAuto-"
 # Name of the WVD Host Pool to apply scaling solution
 $WVDHostPoolName = "wvd-pool-ai-gpu"
 # Resource Group Name for the Azure Automation Account
@@ -349,7 +349,7 @@ try {
 } 
 catch {
 	Write-Warning "Creating Resource Group"
-	New-AzResourceGroup -Name $AzAAResourceGroupName -Location $AzAARegion
+	New-AzResourceGroup -Name $AzAAResourceGroupName -Location $AzAARegion -Verbose -Force
 }
 
 # Ensure the temp folder exists and switch to it
@@ -361,14 +361,14 @@ Set-Location -Path $tempFolder
  # MULTIPLE HOST POOLS CAN USE THE SAME AUTOMATION ACCOUNT
  #>
 
-New-AzureAutomationAccount -azRegion $AzAARegion -aadTenantId $AadTenantId -azSubscriptionId $AzSubscriptionId `
+Create-AzureAutomationAccount -azRegion $AzAARegion -aadTenantId $AadTenantId -azSubscriptionId $AzSubscriptionId `
 	-azAAResourceGroupName $AzAAResourceGroupName -azAAName $AzAAName -azLAName $AzLAName
 
 <# Create the Azure Automation Account Run As credential
  # Based on https://abcdazure.azurewebsites.net/create-automation-account-with-powershell/
  #>
 Set-Item Env:\SuppressAzurePowerShellBreakingChangeWarnings "true"
-New-AzureAutomationRunAsAccount -automationAccountName $AzAAName -resourceGroupName $AzAAResourceGroupName `
+Create-AzureAutomationRunAsAccount -automationAccountName $AzAAName -resourceGroupName $AzAAResourceGroupName `
 	-keyVaultName $KeyVaultName -subscriptionId $AzSubscriptionId -location $AzAARegion `
 	-tempFolder $TempFolder -aadTenantId $AadTenantId
 
