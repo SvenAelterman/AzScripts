@@ -1,4 +1,4 @@
-function Create-LogAnalyticsWorkspace {
+function New-WvdScaleLogAnalyticsWorkspace {
 	param(
 		[string]$azRegion,
 		[string]$azAAResourceGroupName,
@@ -15,7 +15,7 @@ function Create-LogAnalyticsWorkspace {
 	}
 }
 
-function Create-AzureAutomationAccount {
+function New-WvdScaleAzureAutomationAccount {
 	param(
 		[string]$azRegion,
 		[string]$aadTenantId,
@@ -43,7 +43,7 @@ function Create-AzureAutomationAccount {
 
 	Write-Output "Checking Log Analytics Workspace"
 
-	Create-LogAnalyticsWorkspace -azAAResourceGroupName $azAAResourceGroupName -azRegion $azRegion `
+	New-WvdScaleLogAnalyticsWorkspace -azAAResourceGroupName $azAAResourceGroupName -azRegion $azRegion `
 		-azLAName $azLAName
 
 	Write-Output "Creating Azure Automation Account $azAAName"
@@ -54,7 +54,7 @@ function Create-AzureAutomationAccount {
 	.\CreateOrUpdateAzAutoAccount.ps1 @Params
 }
 
-function Create-AzureAutomationRunAsAccount {
+function New-WvdScaleAzureAutomationRunAsAccount {
 	param(
 		[string]$automationAccountName,
 		[string]$resourceGroupName,
@@ -183,7 +183,7 @@ function Create-AzureAutomationRunAsAccount {
 	Write-Output "RunAsAccount Creation Completed..."	
 }
 
-function New-LogicApp {
+function New-WvdScaleLogicApp {
 	param (
 		[string]$wvdHostPoolName, <# TODO: Make this is an array #>
 		[string]$azAAName,
@@ -361,14 +361,14 @@ Set-Location -Path $tempFolder
  # MULTIPLE HOST POOLS CAN USE THE SAME AUTOMATION ACCOUNT
  #>
 
-Create-AzureAutomationAccount -azRegion $AzAARegion -aadTenantId $AadTenantId -azSubscriptionId $AzSubscriptionId `
+New-WvdScaleAzureAutomationAccount -azRegion $AzAARegion -aadTenantId $AadTenantId -azSubscriptionId $AzSubscriptionId `
 	-azAAResourceGroupName $AzAAResourceGroupName -azAAName $AzAAName -azLAName $AzLAName
 
 <# Create the Azure Automation Account Run As credential
  # Based on https://abcdazure.azurewebsites.net/create-automation-account-with-powershell/
  #>
 Set-Item Env:\SuppressAzurePowerShellBreakingChangeWarnings "true"
-Create-AzureAutomationRunAsAccount -automationAccountName $AzAAName -resourceGroupName $AzAAResourceGroupName `
+New-WvdScaleAzureAutomationRunAsAccount -automationAccountName $AzAAName -resourceGroupName $AzAAResourceGroupName `
 	-keyVaultName $KeyVaultName -subscriptionId $AzSubscriptionId -location $AzAARegion `
 	-tempFolder $TempFolder -aadTenantId $AadTenantId
 
@@ -383,7 +383,7 @@ $LogAnalyticsPrimaryKey = $Workspace.PrimarySharedKey
 $LogAnalyticsWorkspaceId = (Get-AzOperationalInsightsWorkspace -ResourceGroupName $AzAAResourceGroupName -Name $AzLAName).CustomerId.GUID
 	
 # TODO: Make $WVDHostPoolName an array to create multiple logic apps at one time
-[string]$LogicAppName = New-LogicApp -azAAName $AzAAName -azSubscriptionId $AzSubscriptionId -wvdHostPoolName $WVDHostPoolName `
+[string]$LogicAppName = New-WvdScaleLogicApp -azAAName $AzAAName -azSubscriptionId $AzSubscriptionId -wvdHostPoolName $WVDHostPoolName `
 	-resourceGroupName $AzAAResourceGroupName -aadTenantId $AADTenantId -azRegion $AzAARegion `
 	-recurrenceInterval $RecurrenceInterval -beginPeakTime $BeginPeakTime -endPeakTime $EndPeakTime `
 	-timeDifference $TimeDifference -sessionThresholdPerCPU $SessionThresholdPerCPU `
