@@ -1,3 +1,84 @@
+# TODO: Specify modules as Requires
+param (
+	# A prefix that will be added to all resources created by this script
+	[Parameter()]
+	[string]$CommonResourceNamePrefix = "WVD-AutoScale-",
+	# Resource Group Name for the Azure Automation Account
+	[Parameter(Position = 0)]
+	[Alias("ResourceGroup,ResourceGroupName,RG")]
+	[string]$AzAAResourceGroupName = "$($CommonResourceNamePrefix)RG",
+	# The temporary folder that will hold downloaded scripts and certificates
+	[Parameter()]
+	[string]$TempFolder = $env:TEMP,
+	# Name of the WVD Host Pool to apply scaling solution
+	[ValidateNotNullOrEmpty()]
+	[Parameter(Mandatory,
+		HelpMessage = "Name of the WVD Host Pool to apply the scaling solution to.",
+		Position = 1)]
+	[string]$WVDHostPoolName,
+	# The name (or ID) of the Azure subscription where the WVD host pool lives and where the scaling resources are created
+	[ValidateNotNullOrEmpty()]
+	[Parameter(Mandatory,
+		HelpMessage = "Name (or ID) of the Azure subscription where the WVD host pool lives.")]
+	[string]$SubscriptionName,
+	# If the Logic App Definition should be the custom version developed by US EDU CSA
+	[Parameter()]
+	[switch]$UseUsEduLogicApp,
+	# If set, does not delete the temp folder after the script finishes
+	[Parameter()]
+	[switch]$SkipDeletingTempFolder,
+	# In minutes, how often the Logic App will run and call the runbook to scale
+	[Parameter()]
+	[int]$RecurrenceInterval = 15,
+	# The start time for peak hours, in local time, in 24-hour format, e.g. "9:00"
+	[Parameter()]
+	[string]$BeginPeakTime = "9:00",
+	# The end time for peak hours, in local time, in 24-hour format, e.g. "17:00"
+	[Parameter()]
+	[string]$EndPeakTime = "17:00",
+	# The time difference between local time and UTC in hours, e.g. +5:30
+	[Parameter()]
+	[string]$TimeDifference = "-5:00",
+	# Enter the maximum number of sessions per CPU that will be used as a threshold to determine when new session host VMs need to be started. This need not be the same number set in the host pool configuration.
+	[Parameter()]
+	[int]$SessionThresholdPerCPU = 2,
+	# The minimum number of session host VMs to keep running during off-peak hours
+	[Parameter()]
+	[int]$MinimumNumberOfRDSH = 1,
+	# The minimum number of session host VMs to start in advance at the start of peak hours
+	[Parameter()]
+	[int]$MinimumNumberOfRDSHPeak = 2,
+	# The name of the Tag associated with session host VMs you don't want to be managed by this scaling tool
+	[Parameter()]
+	[string]$MaintenanceTagName = "$($CommonResourceNamePrefix)scaling-dont-touch",
+	# The number of seconds to wait before automatically signing out users on a session host that will be shut down when scaling in. If set to 0, any session host VM that has user sessions will be left untouched.
+	[Parameter()]
+	[int]$LimitSecondsToForceLogOffUser = 600,
+	# The title of the message sent to the user before they are forced to sign out
+	[Parameter()]
+	[string]$LogOffMessageTitle = "This session host is about to shut down",
+	# The body of the message sent to the user before they are forced to sign out
+	[Parameter()]
+	[string]$LogOffMessageBody = "Please save your work and log off. If you need to continue working, you may immediately log on again.",
+	# The Tenant ID of the Azure AD tenant. If not specified, the tenant ID of the selected subscription will be used
+	[Parameter()]
+	[string]$AadTenantId,
+	# The subscription ID to use. If not specified, the active subscription from the active AzContext will be used. If specified, it must match the subscription specified in $SubscriptionName.
+	[Parameter()]
+	[string]$AzSubscriptionId,
+	# The name for the Azure Automation Account. If it doesn't exist yet, it will be created.
+	[Parameter()]
+	[string]$AzAAName = "$($CommonResourceNamePrefix)AutomationAccount",
+	# The Azure region to use for new resources
+	[Parameter()]
+	[string]$AzAARegion = "eastus",
+	# The name of the Log Analytics Workspace. If it doesn't exist yet, it will be created.
+	[Parameter()]
+	[string]$AzLAName = "$($CommonResourceNamePrefix)Workspace",
+	# The name of the Key Vault to store the certificate for the Azure Automation Run As account. If it doesn't exist yet, it will be created.
+	[Parameter()]
+	[string]$KeyVaultName = "$($CommonResourceNamePrefix)KV"
+)
 function New-WvdScaleLogAnalyticsWorkspace {
 	param(
 		[string]$azRegion,
@@ -6,12 +87,15 @@ function New-WvdScaleLogAnalyticsWorkspace {
 	)
 
 	try {
+		# Attempt to get the workspace by name and resource group
 		Get-AzOperationalInsightsWorkspace -Name $azLAName -ResourceGroupName $azAAResourceGroupName -ErrorAction Stop
 	}
 	catch {
-		Write-Warning "Creating Log Analytics Workspace $azLAName"
+		# TODO: Ensure global uniqueness: try the specified name first, then add randomization
+		# Global uniqueness requirement doc: https://docs.microsoft.com/en-us/azure/azure-monitor/learn/quick-create-workspace#create-a-workspace
+		Write-Warning "Creating new Log Analytics Workspace $azLAName"
 		New-AzOperationalInsightsWorkspace -Location $azRegion -Name $azLAName -Sku Standard `
-		  -ResourceGroupName $azAAResourceGroupName	
+			-ResourceGroupName $azAAResourceGroupName	
 	}
 }
 
@@ -32,13 +116,13 @@ function New-WvdScaleAzureAutomationAccount {
 
 	# Define script parameters - assuming Spring 2020 (ARM) release only
 	$Params = @{
-		"Location"				= $azRegion
-		"UseARMAPI"				= $true
-		"AADTenantId"		 	= $aadTenantId				# Optional. If not specified, it will use the current Azure context
-		"SubscriptionId"		= $azSubscriptionId			# Optional. If not specified, it will use the current Azure context
-		"ResourceGroupName"		= $azAAResourceGroupName	# Optional. Default: "WVDAutoScaleResourceGroup"
+		"Location"              = $azRegion
+		"UseARMAPI"             = $true
+		"AADTenantId"           = $aadTenantId				# Optional. If not specified, it will use the current Azure context
+		"SubscriptionId"        = $azSubscriptionId			# Optional. If not specified, it will use the current Azure context
+		"ResourceGroupName"     = $azAAResourceGroupName	# Optional. Default: "WVDAutoScaleResourceGroup"
 		"AutomationAccountName" = $azAAName			 		# Optional. Default: "WVDAutoScaleAutomationAccount"
-		"WorkspaceName"			= $azLAName			 		# Optional. If specified, Log Analytics will be used to configure the custom log table that the runbook PowerShell script can send logs to
+		"WorkspaceName"         = $azLAName			 		# Optional. If specified, Log Analytics will be used to configure the custom log table that the runbook PowerShell script can send logs to
 	}
 
 	Write-Output "Checking Log Analytics Workspace"
@@ -114,8 +198,9 @@ function New-WvdScaleAzureAutomationRunAsAccount {
 		return
 	}
 	
-	$SecretRetrieved = Get-AzKeyVaultSecret -VaultName $keyVaultName -Name $CertificateName
-	$PfxBytes = [System.Convert]::FromBase64String($SecretRetrieved.SecretValueText)
+	$SecretRetrieved = Get-AzKeyVaultSecret -VaultName $keyVaultName -Name $CertificateName -AsPlainText
+	#$PfxBytes = [System.Convert]::FromBase64String($SecretRetrieved.SecretValueText)
+	$PfxBytes = [System.Convert]::FromBase64String($SecretRetrieved)
 	$CertCollection = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2Collection
 	$CertCollection.Import($PfxBytes, $null, [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::Exportable)
 	
@@ -171,7 +256,7 @@ function New-WvdScaleAzureAutomationRunAsAccount {
 	$ConnectionAssetName = "AzureRunAsConnection"
 	$ApplicationId = $Application.ApplicationId
 	$Thumbprint = $PfxCert.Thumbprint
-	$ConnectionFieldValues = @{"ApplicationId" = $ApplicationID; "TenantId" = $aadTenantId; "CertificateThumbprint" = $Thumbprint; "SubscriptionId" = $subscriptionId}
+	$ConnectionFieldValues = @{"ApplicationId" = $ApplicationID; "TenantId" = $aadTenantId; "CertificateThumbprint" = $Thumbprint; "SubscriptionId" = $subscriptionId }
 	
 	# Create a Automation connection asset named AzureRunAsConnection in the Automation account. This connection uses the service principal.
 	Write-Output "Creating Connection in the Asset..."
@@ -215,33 +300,33 @@ function New-WvdScaleLogicApp {
 	$AutoAccount = Get-AzAutomationAccount -Name $azAAName -ResourceGroupName $resourceGroupName
 	# TODO: There should only be 1?
 	$AutoAccountConnection = (Get-AzAutomationConnection -ResourceGroupName $AutoAccount.ResourceGroupName `
-		-AutomationAccountName $AutoAccount.AutomationAccountName)[0]
-		#Out-GridView -OutputMode:Single -Title "Select the Azure RunAs connection asset"
+			-AutomationAccountName $AutoAccount.AutomationAccountName)[0]
+	#Out-GridView -OutputMode:Single -Title "Select the Azure RunAs connection asset"
 
 	$WebhookUri = Get-WebHookUri -azAAName $azAAName -resourceGroupName $resourceGroupName
 
 	$Params = @{
-		"AADTenantId"					= $aADTenantId						# Optional. If not specified, it will use the current Azure context
-		"SubscriptionID"				= $azSubscriptionId					# Optional. If not specified, it will use the current Azure context
-		"ResourceGroupName"				= $azAAResourceGroupName				# Optional. Default: "WVDAutoScaleResourceGroup"
-		"Location"				  		= $azRegion						  # Optional. Default: "West US2"
-		"UseARMAPI"				 		= $true
-		"HostPoolName"					= $WVDHostPool.Name
-		"HostPoolResourceGroupName"		= $WVDHostPool.ResourceGroupName		 # Optional. Default: same as ResourceGroupName param value
-		"LogAnalyticsWorkspaceId"		= $logAnalyticsWorkspaceId			  # Optional. If not specified, script will not log to the Log Analytics
-		"LogAnalyticsPrimaryKey"		= $logAnalyticsPrimaryKey				# Optional. If not specified, script will not log to the Log Analytics
-		"ConnectionAssetName"			= $AutoAccountConnection.Name			# Optional. Default: "AzureRunAsConnection"
-		"RecurrenceInterval"			= $recurrenceInterval				  # Optional. Default: 15
-		"BeginPeakTime"					= $beginPeakTime					  # Optional. Default: "09:00"
-		"EndPeakTime"					= $endPeakTime						# Optional. Default: "17:00"
-		"TimeDifference"			 	= $timeDifference					 # Optional. Default: "-7:00"
-		"SessionThresholdPerCPU"		= $sessionThresholdPerCPU				# Optional. Default: 1
-		"MinimumNumberOfRDSH"			= $minimumNumberOfRDSH				 # Optional. Default: 1
-		"MaintenanceTagName"			= $maintenanceTagName				  # Optional.
+		"AADTenantId"                   = $aADTenantId						# Optional. If not specified, it will use the current Azure context
+		"SubscriptionID"                = $azSubscriptionId					# Optional. If not specified, it will use the current Azure context
+		"ResourceGroupName"             = $azAAResourceGroupName				# Optional. Default: "WVDAutoScaleResourceGroup"
+		"Location"                      = $azRegion						  # Optional. Default: "West US2"
+		"UseARMAPI"                     = $true
+		"HostPoolName"                  = $WVDHostPool.Name
+		"HostPoolResourceGroupName"     = $WVDHostPool.ResourceGroupName		 # Optional. Default: same as ResourceGroupName param value
+		"LogAnalyticsWorkspaceId"       = $logAnalyticsWorkspaceId			  # Optional. If not specified, script will not log to the Log Analytics
+		"LogAnalyticsPrimaryKey"        = $logAnalyticsPrimaryKey				# Optional. If not specified, script will not log to the Log Analytics
+		"ConnectionAssetName"           = $AutoAccountConnection.Name			# Optional. Default: "AzureRunAsConnection"
+		"RecurrenceInterval"            = $recurrenceInterval				  # Optional. Default: 15
+		"BeginPeakTime"                 = $beginPeakTime					  # Optional. Default: "09:00"
+		"EndPeakTime"                   = $endPeakTime						# Optional. Default: "17:00"
+		"TimeDifference"                = $timeDifference					 # Optional. Default: "-7:00"
+		"SessionThresholdPerCPU"        = $sessionThresholdPerCPU				# Optional. Default: 1
+		"MinimumNumberOfRDSH"           = $minimumNumberOfRDSH				 # Optional. Default: 1
+		"MaintenanceTagName"            = $maintenanceTagName				  # Optional.
 		"LimitSecondsToForceLogOffUser" = $limitSecondsToForceLogOffUser		 # Optional. Default: 1
-		"LogOffMessageTitle"			= $logOffMessageTitle				  # Optional. Default: "Machine is about to shutdown."
-		"LogOffMessageBody"				= $logOffMessageBody					# Optional. Default: "Your session will be logged off. Please save and close everything."
-		"WebhookURI"					= $WebhookUri
+		"LogOffMessageTitle"            = $logOffMessageTitle				  # Optional. Default: "Machine is about to shutdown."
+		"LogOffMessageBody"             = $logOffMessageBody					# Optional. Default: "Your session will be logged off. Please save and close everything."
+		"WebhookURI"                    = $WebhookUri
 	}
 
 	$out = .\CreateOrUpdateAzLogicApp.ps1 @Params
@@ -259,114 +344,90 @@ function Get-WebHookUri {
 	)
 
 	return (Get-AzAutomationVariable -Name 'WebhookURIARMBased' -ResourceGroupName $resourceGroupName `
-		-AutomationAccountName $azAAName).Value
+			-AutomationAccountName $azAAName).Value
 }
+
+$ErrorActionPreference = "Inquire"
 
 <#
  # VARIABLES SECTION
- # REVIEW AND CUSTOMIZE
+ # REVIEW, AND CUSTOMIZE IF NEEDED
  #>
 
-# MUST SET VARIABLES
+# This variable is not currently used
+[string]$TimeZoneNameForPeakTime = (Get-TimeZone).Id
+ 
+#Check if Az module is on the system  
+if (Get-Module -ListAvailable -Name Az) {
+	# TODO: Ensure running as admin before updating or installing a module
+	Update-Module -Name Az
+}
+else {
+	Install-Module Az
+}
 
-# Folder where script files will be downloaded to, and working directory of the script
-# TODO: This folder will contain a PFX certificate file and other secrets and should be cleaned after
+$AzContext = Get-AzContext
 
-#$TempFolder = $env:TEMP
-$TempFolder = "C:\Temp"
+if (!$AzContext) {
+	Login-AzAccount
 
-# TODO: Get from params
+	$AzContext = Get-AzContext
 
-# Common Prefix (can be left blank if not desired)
-$CommonResourceNamePrefix = "WVDdemo-ScaleAuto-"
-# Name of the WVD Host Pool to apply scaling solution
-$WVDHostPoolName = "wvd-pool-ai-gpu"
-# Resource Group Name for the Azure Automation Account
-$AzAAResourceGroupName = "$($CommonResourceNamePrefix)RG"
-# Subscription name or ID
-$SubscriptionName = "Visual Studio Enterprise (MS)"
-# Set to $true if the Logic App definition should be the one created by the US EDU CSAs
-$UseUsEduLogicApp = $true
-# This variable is currently not used
-$TimeZoneNameForPeakTime = "Central Standard Time"
+	if (!$AzContext) {
+		throw "Could not retrieve Azure context. Did you authenticate?"
+	}
+}
 
-# END MUST SET VARIABLES
-
-# In minutes, how often the Logic App will run and call the Runbook to scale
-$RecurrenceInterval = 15
-# The start time for peak hours in local time, e.g. 9:00
-$BeginPeakTime = "8:00"
-# The end time for peak hours in local time, e.g. 18:00
-$EndPeakTime = "17:00"
-# The time difference between local time and UTC in hours, e.g. +5:30
-# Note: This is not Daylight Saving Time ("Summertime") aware
-$TimeDifference = "-5:00"
-# Enter the maximum number of sessions per CPU that will be used as a threshold to determine when new session host VMs need to be started during peak hours
-# This need not be the same number set in the host pool configuration
-$SessionThresholdPerCPU = 2
-# The minimum number of session host VMs to keep running during off-peak hours
-$MinimumNumberOfRDSH = 1
-# The minimum number of session host VMs to run during peak hours
-# Note: this value is only relevant when using the US EDU customized logic app
-$MinimumNumberOfRDSHPeak = 2
-# The name of the Tag associated with VMs you don't want to be managed by this scaling tool
-$MaintenanceTagName = "$($CommonResourceNamePrefix)scaling-dont-touch"
-# Enter the number of seconds to wait before automatically signing out users. 
-# If set to 0, any session host VM that has user sessions, will be left untouched
-$LimitSecondsToForceLogOffUser = 900
-# Enter the title of the message sent to the user before they are forced to sign out
-$LogOffMessageTitle = "This session host is about to shut down"
-# Enter the body of the message sent to the user before they are forced to sign out
-$LogOffMessageBody = "Please save your work and log off. If you need to continue working, you may immediately log on again."
-
-# TODO: Ensure the Az module is up-to-date
-
-Login-AzAccount
 Select-AzSubscription -Subscription $SubscriptionName
 $AzContext = Get-AzContext
 
-# Assuming the Azure AD Directory of the user is where WVD lives
-# Change if necessary
-$AadTenantId = $AzContext.Subscription.TenantId
-$AzSubscriptionId = $AzContext.Subscription.Id
-# Name for the Azure Automation Account
-$AzAAName = "$($CommonResourceNamePrefix)AutomationAccount"
-# Azure Region for the Automation Account, Log Analytics workspace, etc.
-$AzAARegion = "eastus"
-# Log Analytics workspace name
-# It will be created if it doesn't exist
-$AzLAName = "$($CommonResourceNamePrefix)Workspace"
-# Name of the Key Vault to store the certificate for the Azure Automation Run As account
-# It will be created if it doesn't exist
-$KeyVaultName = "$($CommonResourceNamePrefix)KV"
+# If no tenant ID was specified as a parameter
+if (! $AadTenantId) {
+	# Get the tenant from the current context
+	$AadTenantId = $AzContext.Subscription.TenantId
+	Write-Warning "Automatically using subscription's tenant $AadTenantId"
+}
+
+# If no subscription ID was specified as a parameter
+if (! $AzSubscriptionId) {
+	$AzSubscriptionId = $AzContext.Subscription.Id
+	Write-Warning "Automatically using subscription $AzSubscriptionId"
+}
 
 # END VARIABLES SECTION
 
-# Get a resource group object
+# Get or create a resource group object
 try {
 	Get-AzResourceGroup -Name $AzAAResourceGroupName -ErrorAction Stop
-	Write-Verbose "Found resource group"
+	Write-Verbose "Found resource group $AzAAResourceGroupName"
 } 
 catch {
-	Write-Warning "Creating Resource Group"
+	Write-Warning "Creating Resource Group $AzAAResourceGroupName"
 	New-AzResourceGroup -Name $AzAAResourceGroupName -Location $AzAARegion -Verbose -Force
 }
 
 # Ensure the temp folder exists and switch to it
-New-Item -ItemType Directory -Path $tempFolder -Force
-Set-Location -Path $tempFolder
+# TODO: Error handling
+[string]$SubDir = New-Guid
+$TempFolder = "$TempFolder\$SubDir"
+
+New-Item -ItemType Directory -Path $TempFolder -Force
+# TODO: Capture current path and switch back after script terminates
+Set-Location -Path $TempFolder
 
 <#
  # THIS SECTION NEEDS TO BE EXECUTED ONLY ONCE TO CREATE AN AUTOMATION ACCOUNT
  # MULTIPLE HOST POOLS CAN USE THE SAME AUTOMATION ACCOUNT
  #>
 
+# TODO: check if automation account by that name exists, and if so, in that region and RG
 New-WvdScaleAzureAutomationAccount -azRegion $AzAARegion -aadTenantId $AadTenantId -azSubscriptionId $AzSubscriptionId `
 	-azAAResourceGroupName $AzAAResourceGroupName -azAAName $AzAAName -azLAName $AzLAName
 
 <# Create the Azure Automation Account Run As credential
  # Based on https://abcdazure.azurewebsites.net/create-automation-account-with-powershell/
  #>
+# TODO: Only when new automation account was created
 Set-Item Env:\SuppressAzurePowerShellBreakingChangeWarnings "true"
 New-WvdScaleAzureAutomationRunAsAccount -automationAccountName $AzAAName -resourceGroupName $AzAAResourceGroupName `
 	-keyVaultName $KeyVaultName -subscriptionId $AzSubscriptionId -location $AzAARegion `
@@ -393,6 +454,7 @@ $LogAnalyticsWorkspaceId = (Get-AzOperationalInsightsWorkspace -ResourceGroupNam
 	-logAnalyticsPrimaryKey $LogAnalyticsPrimaryKey -logAnalyticsWorkspaceId $LogAnalyticsWorkspaceId
 
 if ($UseUsEduLogicApp) {
+	Write-Host "Customizing the Logic App definition with the US Education customizations"
 	$UsEduCustomLogicAppDefinitionUri = "https://raw.githubusercontent.com/Microsoft-USEduAzure/Windows-Virtual-Desktop/master/daily-scaling/files/dailyscaling.json"
 	$LogicAppDefinitionFileName = "UsEduCustomLogicAppDefinition.json"
 	$LogicAppDefinitionContentFileName = "UsEduCustomLogicAppDefinitionContent.json"
@@ -460,6 +522,12 @@ if ($UseUsEduLogicApp) {
 		-State Enabled -Force
 }
 
-Write-Host "Completed..."
+if ($SkipDeletingTempFolder) {
+	Write-Verbose "You should clear the contents of the $TempFolder directory because secrets are stored in it."
+}
+else {
+	Remove-Item -Path $TempFolder -Force
+	Write-Verbose "Deleted the temporary folder $TempFolder"
+}
 
-Write-Verbose "You should clear the contents of the $TempFolder directory because secrets are stored in it."
+Write-Host "Completed..."
